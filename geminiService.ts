@@ -1,10 +1,12 @@
 
 import { GoogleGenAI } from "@google/genai";
 
-// Use process.env.API_KEY directly for initialization as per guidelines
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
+/**
+ * Generates encouraging academic remarks based on subject scores.
+ */
 export const generateReportRemarks = async (studentName: string, scores: any[]) => {
+  // Initialize AI client right before the call as per recommended practices
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `Based on the following scores for student ${studentName}, generate a 2-sentence encouraging academic remark for a school report card: ${JSON.stringify(scores)}`;
   
   try {
@@ -19,7 +21,11 @@ export const generateReportRemarks = async (studentName: string, scores: any[]) 
   }
 };
 
+/**
+ * Drafts a professional school announcement for WhatsApp.
+ */
 export const draftWhatsAppAnnouncement = async (topic: string) => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `Write a professional but friendly school WhatsApp announcement message about: ${topic}. Include emojis.`;
   
   try {
@@ -29,6 +35,7 @@ export const draftWhatsAppAnnouncement = async (topic: string) => {
     });
     return response.text || `Announcement: ${topic}`;
   } catch (error) {
+    console.error("AI announcement generation failed:", error);
     return `📢 Important Update: ${topic}. Please check the notice board for details.`;
   }
 };
