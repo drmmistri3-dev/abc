@@ -11,6 +11,7 @@ interface SettingsViewProps {
   examAlertContent: string;
   language: string;
   onUpdateBranding: (name: string, slogan: string, session: string, start: string, end: string, eTitle: string, eContent: string, lang: string) => void;
+  onLogout: () => void;
   t: (key: string) => string;
 }
 
@@ -24,6 +25,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   examAlertContent,
   language,
   onUpdateBranding,
+  onLogout,
   t
 }) => {
   const [name, setName] = useState(schoolName);
@@ -186,6 +188,20 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           </div>
         </form>
+
+        <div className="space-y-6 pt-12 mt-12 border-t border-slate-100">
+          <h3 className="text-[10px] font-black text-rose-600 uppercase tracking-[0.3em] pl-1">Danger Zone</h3>
+          <button 
+            type="button"
+            onClick={onLogout}
+            className="w-full py-5 bg-rose-50 text-rose-600 rounded-[2rem] font-black uppercase tracking-[0.2em] hover:bg-rose-100 transition-all flex items-center justify-center gap-4 border border-rose-100 shadow-sm"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+            </svg>
+            {t('logout')}
+          </button>
+        </div>
       </div>
 
       <div className="p-8 bg-indigo-50/50 rounded-[3rem] border-2 border-dashed border-indigo-100 text-center animate-pulse">

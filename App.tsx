@@ -26,7 +26,7 @@ const App: React.FC = () => {
   const [sessionStart, setSessionStart] = useState('2024-04-01');
   const [sessionEnd, setSessionEnd] = useState('2025-03-31');
   const [examAlertTitle, setExamAlertTitle] = useState('Final Term 2024');
-  const [examAlertContent, setExamAlertContent] = useState('Starting from 15th March. Admit cards will be generated next week.');
+  const [examAlertContent, setExamAlertContent] = useState('Examinations starting next month. Please ensure all dues are cleared.');
   const [language, setLanguage] = useState<'en' | 'hi'>('en');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<Student | Teacher | null>(null);
@@ -37,37 +37,30 @@ const App: React.FC = () => {
   const t = (key: string) => translations[language][key] || key;
 
   const fetchData = useCallback(async (userId: string) => {
-    // 1. Fetch Students
-    const { data: studentsData, error: sError } = await supabase
+    const { data: studentsData } = await supabase
       .from('students')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
-    // 2. Fetch Teachers
-    const { data: teachersData, error: tError } = await supabase
+    const { data: teachersData } = await supabase
       .from('teachers')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
-    // 3. Fetch School Config
     const { data: configData } = await supabase
       .from('school_config')
       .select('*')
       .eq('user_id', userId)
       .single();
 
-    if (!sError && studentsData && studentsData.length > 0) {
-      setStudents(studentsData);
-    } else {
-      setStudents(MOCK_STUDENTS);
+    if (studentsData) {
+      setStudents(studentsData.length > 0 ? studentsData : MOCK_STUDENTS);
     }
 
-    if (!tError && teachersData && teachersData.length > 0) {
-      setTeachers(teachersData);
-    } else {
-      setTeachers(MOCK_TEACHERS);
+    if (teachersData) {
+      setTeachers(teachersData.length > 0 ? teachersData : MOCK_TEACHERS);
     }
 
     if (configData) {
@@ -77,7 +70,7 @@ const App: React.FC = () => {
       setSessionStart(configData.start_date || '2024-04-01');
       setSessionEnd(configData.end_date || '2025-03-31');
       setExamAlertTitle(configData.exam_title || 'Final Term 2024');
-      setExamAlertContent(configData.exam_content || 'Starting from 15th March.');
+      setExamAlertContent(configData.exam_content || 'Starting next month.');
       setLanguage(configData.language || 'en');
     }
   }, []);
@@ -95,7 +88,6 @@ const App: React.FC = () => {
       }
       setIsInitialized(true);
     };
-
     setupAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -118,7 +110,6 @@ const App: React.FC = () => {
     await supabase.auth.signOut();
     setCurrentUser(null);
     setActiveView('dashboard');
-    setViewStack(['dashboard']);
   };
 
   const goBack = () => {
@@ -146,37 +137,81 @@ const App: React.FC = () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const studentToSave = { ...newStudent, user_id: user.id };
+    // Destructure to only pick valid DB columns, specifically excluding 'subjects' which exists in form data
+    const { id, name, photo, className, fatherName, guardianName, aadhaar, phone, address, admissionFees, monthlyFees, examResults, admissionDate } = (newStudent as any);
+    
+    const studentToSave = { 
+      id, name, photo, className, fatherName, guardianName, aadhaar, phone, address, 
+      admissionFees, monthlyFees, examResults, admissionDate,
+      user_id: user.id 
+    };
+
     setStudents(prev => [newStudent, ...prev]);
+    
     const { error } = await supabase.from('students').insert([studentToSave]);
-    if (error) console.error('Error adding student:', error);
+    if (error) {
+      console.error('Error adding student to cloud:', error.message);
+      fetchData(user.id); // Rollback/Sync if error
+    }
   };
 
   const handleUpdateStudent = async (updatedStudent: Student) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Strip internal database keys and local-only UI keys to prevent update rejection
+    const { id, user_id, created_at, subjects, ...updateData } = (updatedStudent as any);
+
     setStudents(prev => prev.map(s => s.id === updatedStudent.id ? updatedStudent : s));
     if (selectedItem?.id === updatedStudent.id) setSelectedItem(updatedStudent);
-    const { error } = await supabase.from('students').update(updatedStudent).eq('id', updatedStudent.id);
-    if (error) console.error('Error updating student:', error);
+    
+    const { error } = await supabase
+      .from('students')
+      .update(updateData)
+      .eq('id', updatedStudent.id)
+      .eq('user_id', user.id);
+      
+    if (error) console.error('Cloud Sync Error (Student):', error.message);
   };
 
   const handleAddTeacher = async (newTeacher: Teacher) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const teacherToSave = { ...newTeacher, user_id: user.id };
+    const { id, name, photo, phone, subject, salary, payments } = (newTeacher as any);
+    const teacherToSave = { id, name, photo, phone, subject, salary, payments, user_id: user.id };
+
     setTeachers(prev => [newTeacher, ...prev]);
+    
     const { error } = await supabase.from('teachers').insert([teacherToSave]);
-    if (error) console.error('Error adding teacher:', error);
+    if (error) {
+      console.error('Error adding teacher to cloud:', error.message);
+      fetchData(user.id);
+    }
   };
 
   const handleUpdateTeacher = async (updatedTeacher: Teacher) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { id, user_id, created_at, ...updateData } = (updatedTeacher as any);
+
     setTeachers(prev => prev.map(t => t.id === updatedTeacher.id ? updatedTeacher : t));
     if (selectedItem?.id === updatedTeacher.id) setSelectedItem(updatedTeacher);
-    const { error } = await supabase.from('teachers').update(updatedTeacher).eq('id', updatedTeacher.id);
-    if (error) console.error('Error updating teacher:', error);
+    
+    const { error } = await supabase
+      .from('teachers')
+      .update(updateData)
+      .eq('id', updatedTeacher.id)
+      .eq('user_id', user.id);
+      
+    if (error) console.error('Cloud Sync Error (Teacher):', error.message);
   };
 
   const handleUpdateMarks = async (studentId: string, termName: string, updatedScores: ExamScore[]) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
     setStudents(prev => prev.map(s => {
       if (s.id === studentId) {
         const updatedExamResults = s.examResults.map(er => 
@@ -184,7 +219,14 @@ const App: React.FC = () => {
         );
         const updated = { ...s, examResults: updatedExamResults };
         if (selectedItem?.id === studentId) setSelectedItem(updated);
-        supabase.from('students').update({ examResults: updatedExamResults }).eq('id', studentId);
+        
+        supabase
+          .from('students')
+          .update({ examResults: updatedExamResults })
+          .eq('id', studentId)
+          .eq('user_id', user.id)
+          .then(({ error }) => error && console.error('Marks Sync Failed:', error.message));
+          
         return updated;
       }
       return s;
@@ -192,6 +234,9 @@ const App: React.FC = () => {
   };
 
   const handleCollectFee = async (studentId: string, month: string, amount: number) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
     setStudents(prev => prev.map(s => {
       if (s.id === studentId) {
         const newPayment = {
@@ -200,9 +245,17 @@ const App: React.FC = () => {
           date: new Date().toLocaleDateString('en-GB'),
           status: FeeStatus.PAID
         };
-        const updated = { ...s, payments: [...(s.payments || []), newPayment] };
+        const updatedPayments = [...(s.payments || []), newPayment];
+        const updated = { ...s, payments: updatedPayments };
         if (selectedItem?.id === studentId) setSelectedItem(updated);
-        supabase.from('students').update({ payments: updated.payments }).eq('id', studentId);
+        
+        supabase
+          .from('students')
+          .update({ payments: updatedPayments })
+          .eq('id', studentId)
+          .eq('user_id', user.id)
+          .then(({ error }) => error && console.error('Fee Sync Failed:', error.message));
+          
         return updated;
       }
       return s;
@@ -210,6 +263,9 @@ const App: React.FC = () => {
   };
 
   const handlePayTeacher = async (teacherId: string, month: string, amount: number) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
     setTeachers(prev => prev.map(t => {
       if (t.id === teacherId) {
         const newPayment = {
@@ -217,9 +273,17 @@ const App: React.FC = () => {
           date: new Date().toLocaleDateString('en-GB'),
           amount
         };
-        const updated = { ...t, payments: [...(t.payments || []), newPayment] };
+        const updatedPayments = [...(t.payments || []), newPayment];
+        const updated = { ...t, payments: updatedPayments };
         if (selectedItem?.id === teacherId) setSelectedItem(updated);
-        supabase.from('teachers').update({ payments: updated.payments }).eq('id', teacherId);
+        
+        supabase
+          .from('teachers')
+          .update({ payments: updatedPayments })
+          .eq('id', teacherId)
+          .eq('user_id', user.id)
+          .then(({ error }) => error && console.error('Payroll Sync Failed:', error.message));
+          
         return updated;
       }
       return t;
@@ -239,7 +303,7 @@ const App: React.FC = () => {
     setExamAlertContent(eContent);
     setLanguage(lang as 'en' | 'hi');
 
-    const { error } = await supabase.from('school_config').upsert({
+    await supabase.from('school_config').upsert({
       user_id: user.id,
       name: n,
       slogan: s,
@@ -250,8 +314,6 @@ const App: React.FC = () => {
       exam_content: eContent,
       language: lang
     }, { onConflict: 'user_id' });
-    
-    if (error) console.error('Error updating config:', error);
   };
 
   if (!isInitialized) {
@@ -259,7 +321,7 @@ const App: React.FC = () => {
       <div className="h-screen w-screen flex items-center justify-center bg-indigo-600">
         <div className="flex flex-col items-center gap-4">
           <div className="animate-spin w-12 h-12 border-4 border-white border-t-transparent rounded-full"></div>
-          <p className="text-white font-black text-[10px] uppercase tracking-[0.3em] opacity-80">Connecting to Cloud Server...</p>
+          <p className="text-white font-black text-[10px] uppercase tracking-[0.3em] opacity-80">Loading Database...</p>
         </div>
       </div>
     );
@@ -298,7 +360,7 @@ const App: React.FC = () => {
             </button>
             <div className="flex items-center gap-3">
               <div className="hidden sm:block text-right">
-                <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest leading-none mb-1">Cloud Sync Active</p>
+                <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest leading-none mb-1">Cloud Sync</p>
                 <p className="text-xs font-black text-slate-800 leading-none">{currentUser.name}</p>
               </div>
               <div className="h-10 w-10 md:h-12 md:w-12 rounded-[1.25rem] bg-indigo-600 flex items-center justify-center text-white font-black shadow-lg border-2 border-white">
@@ -316,14 +378,28 @@ const App: React.FC = () => {
             {activeView === 'fees' && <FeeView schoolName={schoolName} students={students} onCollectFee={handleCollectFee} t={t} />}
             {activeView === 'exams' && <ExamView schoolName={schoolName} students={students} onUpdateMarks={handleUpdateMarks} t={t} />}
             {activeView === 'comms' && <CommsView schoolName={schoolName} students={students} t={t} />}
-            {activeView === 'settings' && <SettingsView schoolName={schoolName} schoolSlogan={schoolSlogan} academicSession={academicSession} sessionStart={sessionStart} sessionEnd={sessionEnd} examAlertTitle={examAlertTitle} examAlertContent={examAlertContent} language={language} onUpdateBranding={handleUpdateBranding} t={t} />}
+            {activeView === 'settings' && (
+              <SettingsView 
+                schoolName={schoolName} 
+                schoolSlogan={schoolSlogan} 
+                academicSession={academicSession} 
+                sessionStart={sessionStart} 
+                sessionEnd={sessionEnd} 
+                examAlertTitle={examAlertTitle} 
+                examAlertContent={examAlertContent} 
+                language={language} 
+                onUpdateBranding={handleUpdateBranding} 
+                onLogout={handleLogout}
+                t={t} 
+              />
+            )}
           </section>
 
           {sidePanelOpen && selectedItem && (
             <div className="w-full lg:w-1/2 h-full bg-white border-l border-slate-200 overflow-y-auto shadow-2xl relative z-40 animate-in slide-in-from-right duration-500">
               <div className="sticky top-0 bg-white/95 backdrop-blur-sm z-30 flex justify-between items-center px-6 md:px-10 py-5 border-b border-slate-100">
                 <div className="flex flex-col">
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em]">Cloud Database Entry</span>
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em]">Record Details</span>
                   <h3 className="text-lg font-black text-slate-800">{selectedItem.name}</h3>
                 </div>
                 <button onClick={() => setSidePanelOpen(false)} className="p-3 bg-slate-50 rounded-2xl hover:bg-slate-100 transition-all text-slate-400 active:scale-90"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12"/></svg></button>
@@ -351,8 +427,7 @@ const App: React.FC = () => {
   );
 };
 
-// ... Rest of the components (MobileNavItem, StudentDetailView, etc.) stay the same as in previous App.tsx
-// I will include the missing sub-components here for a complete file replacement.
+// ... Rest of the components stay identical to the original App.tsx ...
 
 const MobileNavItem: React.FC<{ icon: string, label: string, active: boolean, onClick: () => void }> = ({ icon, label, active, onClick }) => (
   <button onClick={onClick} className={`flex-1 flex flex-col items-center gap-1 transition-all ${active ? 'text-indigo-600' : 'text-slate-400'}`}>
@@ -512,7 +587,7 @@ const StudentDetailView: React.FC<{
                      <td className="px-4 py-2">
                        <input 
                         type="number" 
-                        className="w-20 mx-auto block p-2 bg-slate-50 border border-slate-200 rounded-xl text-center font-black text-indigo-600 focus:ring-2 ring-indigo-50 outline-none" 
+                        className="w-12 p-1 bg-slate-50 border border-slate-200 rounded font-black text-indigo-600 outline-none" 
                         value={score.marks} 
                         onChange={(e) => handleMarkChange(sIdx, 'marks', e.target.value)} 
                        />
@@ -520,7 +595,7 @@ const StudentDetailView: React.FC<{
                      <td className="px-4 py-2">
                        <input 
                         type="number" 
-                        className="w-20 mx-auto block p-2 bg-slate-50 border border-slate-200 rounded-xl text-center font-black text-emerald-600 focus:ring-2 ring-emerald-50 outline-none" 
+                        className="w-12 p-1 bg-slate-50 border border-slate-200 rounded font-black text-emerald-600 outline-none" 
                         value={score.oralMarks} 
                         onChange={(e) => handleMarkChange(sIdx, 'oralMarks', e.target.value)} 
                        />
